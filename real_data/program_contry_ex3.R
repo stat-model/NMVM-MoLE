@@ -377,25 +377,21 @@ ylim <- quantile(coords[,2], probs = c(0.01, 0.99), na.rm = TRUE)
 
 # ================= Plot map =================
 p_map <- ggplot(map_data) +
-  geom_sf(aes(fill = as.factor(cluster)), color = "white", size = 0.1) +
+  geom_sf(aes(fill = as.factor(cluster)), color = "black", size = 0.1) +
   scale_fill_manual(
-    values = c("1" = "#8A0000", "2" = "#008A00", "3" = "#004D8A"),
+    values = c("1" = "#5E7D6A", "2" = "#BFA27A", "3" = "#7C90A6"),
     name = "Cluster",
     labels = c("1", "2", "3")
   ) +
   labs(title = "US County Clustering Map") +
-  theme_minimal(base_size = 12) +
+  theme_minimal(base_size = 11) +
   theme(
     legend.position = "right",
     plot.title = element_text(hjust = 0.5, face = "bold"),
-    legend.title = element_text(size = 12),
-    legend.text = element_text(size = 11)
+    panel.grid = element_blank()
   ) +
-  coord_sf(
-    xlim = xlim,
-    ylim = ylim,
-    expand = FALSE
-  )
+  coord_sf(xlim = xlim, ylim = ylim, expand = FALSE)
+
 
 # ================= Save plots =================
 ggsave("figures/ex3_us_county_clusters.png", plot = p_map, width = 12, height = 6, dpi = 300)
