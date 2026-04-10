@@ -14,7 +14,7 @@ library(GGally)
 library(sf)
 library(tigris)
 library(stringi)
-
+library(GGally)
 # ================= Create folders =================
 if (!dir.exists("figures")) dir.create("figures")
 if (!dir.exists("results")) dir.create("results")
@@ -283,15 +283,38 @@ ggsave("figures/scatterplots_clusters.pdf",
        height = 2.5)
 
 # ================= Pair plot =================
+df$cluster <- factor(df$cluster)
+
+cluster_colors <- c("1" = "#4C6A67", "2" = "#C06C2B", "3" = "#3A4F63")
+
 p_pair_cluster <- ggpairs(
   df,
   columns = c("log_pop", "unemployment", "education", "poverty"),
-  mapping = aes(color = cluster)
-)
+  mapping = aes(color = cluster),
+  
+  # Upper: correlations (clean and informative)
+  upper = list(continuous = wrap("cor", size = 3)),
+  
+  # Lower: scatter (light, not heavy)
+  lower = list(continuous = wrap("points", alpha = 0.5, size = 0.8)),
+  
+  # Diagonal: distributions
+  diag = list(continuous = wrap("densityDiag"))
+) +
+  scale_color_manual(values = cluster_colors) +
+  theme_minimal(base_size = 9)
 
-ggsave("figures/pair_clusters.png", p_pair_cluster, width = 10, height = 5, dpi = 300)
-ggsave("figures/pair_clusters.pdf", p_pair_cluster, width = 10, height = 5)
+# Save (square and compact for paper)
+ggsave("figures/pair_clusters.pdf",
+       plot = p_pair_cluster,
+       width = 6.5,
+       height = 6.5)
 
+ggsave("figures/pair_clusters.png",
+       plot = p_pair_cluster,
+       width = 6.5,
+       height = 6.5,
+       dpi = 300)
 # ================= Gating function =================
 tau <- best_model$alpha
 grid_x <- seq(min(df$log_pop), max(df$log_pop), length.out = 200)
