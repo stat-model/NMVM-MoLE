@@ -1,5 +1,5 @@
 ############################################################
-# Simulation 4.4: Robustness against heavy-tailed noise,
+#Robustness against heavy-tailed noise,
 # good leverage points, and bad leverage contamination
 ############################################################
 
