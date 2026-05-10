@@ -1,10 +1,8 @@
 ############################################################
-# Robust MoLE Simulation Framework
+# Simulation 4.4: Robustness against heavy-tailed noise,
+# good leverage points, and bad leverage contamination
 ############################################################
 
-#========================================================
-# Clear environment & load packages
-#========================================================
 rm(list = ls())
 
 library(sn)
@@ -13,25 +11,30 @@ library(aricode)
 library(MASS)
 
 #========================================================
-# Functions directory
+# Source functions
 #========================================================
-WD.PATH <- paste0(getwd(), "/Functions")
 
-source(file.path(WD.PATH, 'Additional.r'))
-source(file.path(WD.PATH, 'GHST.r'))
-source(file.path(WD.PATH, 'NMVBS.r'))
-source(file.path(WD.PATH, 'NIG.r'))
-source(file.path(WD.PATH, 'SMSN_fiting.r'))
-source(file.path(WD.PATH, 'normal.r'))
-source(file.path(WD.PATH, 'Trimmed.r'))
-source(file.path(WD.PATH, 'Contaminated.r'))
-source(file.path(WD.PATH, 'RobustBI.r'))
+WD.PATH <- file.path(getwd(), "Functions")
+
+source(file.path(WD.PATH, "Additional.R"))
+source(file.path(WD.PATH, "GHST.R"))
+source(file.path(WD.PATH, "NMVBS.R"))
+source(file.path(WD.PATH, "NIG.R"))
+source(file.path(WD.PATH, "SMSN_fiting.R"))
+source(file.path(WD.PATH, "normal.R"))
+source(file.path(WD.PATH, "Trimmed.R"))
+source(file.path(WD.PATH, "Contaminated.R"))
+source(file.path(WD.PATH, "RobustBI.R"))
+
+if(!dir.exists("results")) dir.create("results")
+
+set.seed(12345)
 
 #========================================================
-# Utility: Stable softmax
+# Stable softmax
 #========================================================
+
 softmax_stable <- function(v){
-  # Returns softmax probabilities in a numerically stable way
   exp_v <- exp(v - max(v))
   exp_v / sum(exp_v)
 }
@@ -39,152 +42,360 @@ softmax_stable <- function(v){
 #========================================================
 # Data generation
 #========================================================
-generate_data_robust <- function(n, scenario = "S1",
-                                 nu = 4, eps = 0.1){
-  #' Generate robust mixture-of-experts data
-  #' 
-  #' @param n sample size
-  #' @param scenario "S1" (baseline), "S2" (heavy-tailed), "S3" (leverage contamination)
-  #' @param nu degrees of freedom for heavy-tailed (S2)
-  #' @param eps contamination proportion (S3)
+
+generate_data_robust <- function(n,
+                                 scenario = "S1",
+                                 nu = 4,
+                                 eps = 0.10,
+                                 delta = 15){
   
-  # Covariates
   x1 <- runif(n, -1, 5)
   r1 <- runif(n, -2, 3)
   
   x <- cbind(1, x1)
   r <- cbind(1, r1)
   
-  # True parameters
-  beta <- list(c(-4,2), c(3,2), c(0.5,-2))
-  sigma2 <- c(2,3,1)
-  lambda <- c(3,2,-4)
-  alpha <- cbind(c(0.5,-2), c(-1,0.6))
+  beta <- list(
+    c(-4, 2),
+    c(3, 2),
+    c(0.5, -2)
+  )
   
-  y <- z <- numeric(n)
+  sigma2 <- c(2, 3, 1)
+  lambda <- c(3, 2, -4)
+  
+  alpha <- cbind(
+    c(0.5, -2),
+    c(-1, 0.6)
+  )
+  
+  y <- numeric(n)
+  z <- numeric(n)
   
   for(i in 1:n){
-    eta <- c(r[i,] %*% alpha, 0)
+    
+    eta <- c(as.numeric(r[i, ] %*% alpha), 0)
     pi_i <- softmax_stable(eta)
     
-    # component assignment
-    z[i] <- sample(1:3,1,prob=pi_i)
+    z[i] <- sample(1:3, 1, prob = pi_i)
     j <- z[i]
-    mu <- sum(x[i,]*beta[[j]])
     
-    # scenario-specific response
-    if(scenario=="S1"){  # skew-normal
-      y[i] <- rsn(1, xi=mu, omega=sqrt(sigma2[j]), alpha=lambda[j])
-    }
-    if(scenario=="S2"){  # skew-t heavy-tailed
-      y[i] <- rst(1, xi=mu, omega=sqrt(sigma2[j]), alpha=lambda[j], nu=nu)
-    }
-    if(scenario=="S3"){  # leverage contamination
-      if(runif(1)<eps){
-        x[i,2] <- runif(1,10,20)
+    mu <- sum(x[i, ] * beta[[j]])
+    
+    if(scenario == "S1"){
+      
+      y[i] <- rsn(
+        n = 1,
+        xi = mu,
+        omega = sqrt(sigma2[j]),
+        alpha = lambda[j]
+      )
+      
+    } else if(scenario == "S2"){
+      
+      y[i] <- rst(
+        n = 1,
+        xi = mu,
+        omega = sqrt(sigma2[j]),
+        alpha = lambda[j],
+        nu = nu
+      )
+      
+    } else if(scenario == "S3"){
+      
+      if(runif(1) < eps){
+        x[i, 2] <- runif(1, 10, 20)
       }
-      mu <- sum(x[i,]*beta[[j]])
-      y[i] <- rsn(1, xi=mu, omega=sqrt(sigma2[j]), alpha=lambda[j])
+      
+      mu_good <- sum(x[i, ] * beta[[j]])
+      
+      y[i] <- rsn(
+        n = 1,
+        xi = mu_good,
+        omega = sqrt(sigma2[j]),
+        alpha = lambda[j]
+      )
+      
+    } else if(scenario == "S4"){
+      
+      if(runif(1) < eps){
+        
+        x[i, 2] <- runif(1, 10, 20)
+        
+        k <- switch(
+          as.character(j),
+          "1" = 2,
+          "2" = 3,
+          "3" = 1
+        )
+        
+        mu_bad <- sum(x[i, ] * beta[[k]]) + delta
+        
+        y[i] <- rnorm(
+          n = 1,
+          mean = mu_bad,
+          sd = sqrt(sigma2[k])
+        )
+        
+      } else {
+        
+        y[i] <- rsn(
+          n = 1,
+          xi = mu,
+          omega = sqrt(sigma2[j]),
+          alpha = lambda[j]
+        )
+      }
+      
+    } else {
+      
+      stop("Unknown scenario.")
     }
   }
   
-  return(list(y=y, x=x, r=r, z=z))
+  list(y = y, x = x, r = r, z = z)
 }
 
 #========================================================
-# Metrics computation
+# Metrics
 #========================================================
+
 compute_metrics <- function(true_z, est_z, loglik, npar){
+  
+  n <- length(true_z)
+  
   ari <- adjustedRandIndex(true_z, est_z)
   ami <- AMI(true_z, est_z)
-  n <- length(true_z)
-  caic <- -2*loglik + npar*(log(n)+1)
-  c(CAIC=caic, ARI=ari, AMI=ami)
+  caic <- -2 * loglik + npar * (log(n) + 1)
+  
+  c(CAIC = caic, ARI = ari, AMI = ami)
+}
+
+#========================================================
+# Safe extraction from fitted objects
+#========================================================
+
+extract_fit_info <- function(f){
+  
+  if(is.null(f)) return(NULL)
+  
+  clusters <- NULL
+  if(!is.null(f$clusters)) clusters <- f$clusters
+  if(is.null(clusters) && !is.null(f$class)) clusters <- f$class
+  if(is.null(clusters) && !is.null(f$classification)) clusters <- f$classification
+  
+  loglik <- NULL
+  if(!is.null(f$loglik)) loglik <- f$loglik
+  if(is.null(loglik) && !is.null(f$logLik)) loglik <- f$logLik
+  if(is.null(loglik) && !is.null(f$ll)) loglik <- f$ll
+  
+  npar <- NULL
+  if(!is.null(f$npar)) npar <- f$npar
+  if(is.null(npar) && !is.null(f$df)) npar <- f$df
+  
+  if(is.null(clusters) || is.null(loglik) || is.null(npar)){
+    return(NULL)
+  }
+  
+  list(
+    clusters = clusters,
+    loglik = as.numeric(loglik)[1],
+    npar = as.numeric(npar)[1]
+  )
 }
 
 #========================================================
 # Run simulation
 #========================================================
+
 run_robust_simulation <- function(R = 200, n = 500){
-  # Run Monte Carlo simulation for robust MoLE models
+  
   scenarios <- list(
-    S1   = list(type="S1"),
-    S2_6 = list(type="S2", nu=6),
-    S2_4 = list(type="S2", nu=4),
-    S2_2 = list(type="S2", nu=2),
-    S3_5  = list(type="S3", eps=0.05),
-    S3_10 = list(type="S3", eps=0.10),
-    S3_15 = list(type="S3", eps=0.15)
+    S1    = list(type = "S1"),
+    
+    S2_6  = list(type = "S2", nu = 6),
+    S2_4  = list(type = "S2", nu = 4),
+    S2_2  = list(type = "S2", nu = 2),
+    
+    S3_5  = list(type = "S3", eps = 0.05),
+    S3_10 = list(type = "S3", eps = 0.10),
+    S3_15 = list(type = "S3", eps = 0.15),
+    
+    S4_2.5 = list(type = "S4", eps = 0.025),
+    S4_5   = list(type = "S4", eps = 0.05),
+    S4_10  = list(type = "S4", eps = 0.10)
   )
   
-  methods <- c("Gaussian","Trimmed","Contaminated",
-               "RobustBI","Skew","NIG","GHST","NMVBS")
+  methods <- c(
+    "Gaussian",
+    "Trimmed",
+    "Contaminated",
+    "RobustBI",
+    "Skew",
+    "NIG",
+    "GHST",
+    "NMVBS"
+  )
   
   results <- list()
   
   for(sc in names(scenarios)){
-    cat("Scenario:", sc, "\n")
-    res_mat <- array(NA, dim = c(R, length(methods), 3),
-                     dimnames = list(NULL, methods, c("CAIC","ARI","AMI")))
+    
+    cat("\nScenario:", sc, "\n")
+    
+    res_mat <- array(
+      NA_real_,
+      dim = c(R, length(methods), 3),
+      dimnames = list(NULL, methods, c("CAIC", "ARI", "AMI"))
+    )
     
     for(rp in 1:R){
+      
       sc_info <- scenarios[[sc]]
       
-      data <- switch(sc_info$type,
-                     S1 = generate_data_robust(n, "S1"),
-                     S2 = generate_data_robust(n, "S2", nu=sc_info$nu),
-                     S3 = generate_data_robust(n, "S3", eps=sc_info$eps))
-      
-      y <- data$y; x <- data$x; r <- data$r; z <- data$z
-      
-      # fit models
-      fits <- list(
-        Gaussian = tryCatch(mix.reg.norm.EM(y, x, r, G = 3, verbose = FALSE), error=function(e) NULL),
-        Trimmed = tryCatch(fit_trimmed_mole(y,x,r,g=3), error=function(e) NULL),
-        Contaminated = tryCatch(fit_contaminated_mole(y,x,r,G=3), error=function(e) NULL),
-        RobustBI = tryCatch(fit_robust_bi_mole(y,x,r,G=3), error=function(e) NULL),
-        Skew = tryCatch(mix.reg.SMSN.EM(y, x, r, G = 3, family="Skew.n", verbose=FALSE), error=function(e) NULL),
-        NIG = tryCatch(mix.NIG.MoE.EM(y, x, r, G = 3, verbose=FALSE), error=function(e) NULL),
-        GHST = tryCatch(mix.GHST.MoE.EM(y,x,r, G = 3, verbose=FALSE), error=function(e) NULL),
-        NMVBS = tryCatch(mix.NMVBS.MoE.EM(y, x, r, G = 3, verbose=FALSE), error=function(e) NULL)
+      data <- switch(
+        sc_info$type,
+        S1 = generate_data_robust(n, scenario = "S1"),
+        S2 = generate_data_robust(n, scenario = "S2", nu = sc_info$nu),
+        S3 = generate_data_robust(n, scenario = "S3", eps = sc_info$eps),
+        S4 = generate_data_robust(n, scenario = "S4", eps = sc_info$eps, delta = 15)
       )
       
-      # compute metrics
+      y <- data$y
+      x <- data$x
+      r <- data$r
+      z <- data$z
+      
+      fits <- list(
+        Gaussian = tryCatch(
+          mix.reg.norm.EM(y = y, X = x, R = r, G = 3, verbose = FALSE),
+          error = function(e) NULL
+        ),
+        
+        Trimmed = tryCatch(
+          fit_trimmed_mole(y, x, r, g = 3),
+          error = function(e) NULL
+        ),
+        
+        Contaminated = tryCatch(
+          fit_contaminated_mole(y, x, r, G = 3),
+          error = function(e) NULL
+        ),
+        
+        RobustBI = tryCatch(
+          fit_robust_bi_mole(y, x, r, G = 3),
+          error = function(e) NULL
+        ),
+        
+        Skew = tryCatch(
+          mix.reg.SMSN.EM(y = y, X = x, R = r, G = 3,
+                          family = "Skew.n", verbose = FALSE),
+          error = function(e) NULL
+        ),
+        
+        NIG = tryCatch(
+          mix.NIG.MoE.EM(y = y, X = x, R = r, G = 3, verbose = FALSE),
+          error = function(e) NULL
+        ),
+        
+        GHST = tryCatch(
+          mix.GHST.MoE.EM(y = y, X = x, R = r, G = 3, verbose = FALSE),
+          error = function(e) NULL
+        ),
+        
+        NMVBS = tryCatch(
+          mix.NMVBS.MoE.EM(y = y, X = x, R = r, G = 3, verbose = FALSE),
+          error = function(e) NULL
+        )
+      )
+      
       for(m in methods){
-        f <- fits[[m]]
-        if(!is.null(f)){
-          res_mat[rp, m, ] <- compute_metrics(z, f$clusters, f$loglik, f$npar)
+        
+        info <- extract_fit_info(fits[[m]])
+        
+        if(!is.null(info)){
+          res_mat[rp, m, ] <- compute_metrics(
+            true_z = z,
+            est_z = info$clusters,
+            loglik = info$loglik,
+            npar = info$npar
+          )
         }
       }
+      
+      if(rp %% 10 == 0){
+        cat("Replication:", rp, "of", R, "\n")
+      }
     }
+    
     results[[sc]] <- res_mat
+    
+    # Save intermediate results after each scenario
+    saveRDS(
+      results,
+      file = "results/temp_results.rds"
+    )
+    
+    cat("Intermediate results saved for scenario:", sc, "\n")
   }
-  return(results)
+  
+  results
 }
 
 #========================================================
 # Summarize results
 #========================================================
+
 summarize_results <- function(results){
-  #' Print mean ± SD for CAIC, ARI, AMI
+  
+  summary_list <- list()
+  
   for(sc in names(results)){
-    cat("\n====================\nScenario:", sc, "\n====================\n")
+    
     arr <- results[[sc]]
+    
     for(m in dimnames(arr)[[2]]){
+      
       vals <- arr[, m, ]
-      means <- colMeans(vals, na.rm=TRUE)
-      sds <- apply(vals, 2, sd, na.rm=TRUE)
-      cat("\n", m, ":\n")
-      cat(sprintf("CAIC: %.3f (%.3f)\n", means["CAIC"], sds["CAIC"]))
-      cat(sprintf("ARI : %.3f (%.3f)\n", means["ARI"], sds["ARI"]))
-      cat(sprintf("AMI : %.3f (%.3f)\n", means["AMI"], sds["AMI"]))
+      
+      means <- colMeans(vals, na.rm = TRUE)
+      sds <- apply(vals, 2, sd, na.rm = TRUE)
+      success <- sum(!is.na(vals[, "ARI"]))
+      
+      summary_list[[length(summary_list) + 1]] <- data.frame(
+        Scenario = sc,
+        Method = m,
+        CAIC_mean = means["CAIC"],
+        CAIC_sd = sds["CAIC"],
+        ARI_mean = means["ARI"],
+        ARI_sd = sds["ARI"],
+        AMI_mean = means["AMI"],
+        AMI_sd = sds["AMI"],
+        Successful_fits = success
+      )
     }
   }
+  
+  do.call(rbind, summary_list)
 }
 
 #========================================================
-# Run simulation & summarize
+# Run
 #========================================================
-results <- run_robust_simulation(R)
-summarize_results(results)
-write.csv(results, "simulation2_results.csv")
+
+# First test with:
+# results <- run_robust_simulation(R = 2, n = 100)
+
+results <- run_robust_simulation(R = 200, n = 500)
+
+summary_results <- summarize_results(results)
+
+print(summary_results)
+
+saveRDS(results, "results/simulation_4_2_full_results.rds")
+
+write.csv(
+  summary_results,
+  "results/simulation_4_2_summary.csv",
+  row.names = FALSE
+)
