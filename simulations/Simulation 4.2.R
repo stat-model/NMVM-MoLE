@@ -12,7 +12,6 @@ library(mclust)
 library(aricode)
 library(MASS)
 
-set.seed(12345)
 
 WD.PATH <- paste0(getwd(), "/Functions")
 
